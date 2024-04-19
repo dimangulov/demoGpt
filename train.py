@@ -45,16 +45,21 @@ import torch.nn as nn
 from torch.nn import functional as F
 torch.manual_seed(1337)
 
+batch_size = 64
+block_size = 256
+max_iters = 5000
+eval_interval = 500
+learning_rate = 3e-4
+
+
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 device
 
-eval_iters = 500
-max_iters = 5000
-eval_interval = 300
-learning_rate = 1e-3
-n_embed = 32
-batch_size = 32
-block_size = 8
+eval_iters = 200
+n_embed = 384
+n_head = 6
+n_layer = 6
+dropout = 0.2
 
 class Head(nn.Module) :
   """ one head of self attention """
@@ -66,6 +71,8 @@ class Head(nn.Module) :
     self.value = nn.Linear(n_embed, head_size, bias=False)
     self.register_buffer("tril", torch.tril(torch.ones(block_size, block_size)))
 
+    self.dropout = nn.Dropout(dropout)
+
   def forward(self, x):
     B,T,C = x.shape
     k = self.key(x)
@@ -75,6 +82,7 @@ class Head(nn.Module) :
     #wei = torch.zeros((T,T))
     wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf'))
     wei = F.softmax(wei, dim = -1)
+    wei = self.dropout(wei)
     v = self.value(x)
     out = wei @ v # B,T,T @ B,T,C --->
     return out
@@ -85,10 +93,11 @@ class MultiHeadAttention(nn.Module):
     super().__init__()
     self.heads = nn.ModuleList([Head(head_size) for _ in range(n_heads)])
     self.proj = nn.Linear(n_heads * head_size, n_embed)
+    self.dropout = nn.Dropout(dropout)
 
   def forward(self, x):
-    out = torch.cat([h(x) for h in self.heads], dim=-1);
-    out = self.proj(out)
+    out = torch.cat([h(x) for h in self.heads], dim=-1)
+    out = self.dropout(self.proj(out))
     return out
 
 
@@ -98,7 +107,8 @@ class FeedForward(nn.Module):
     self.net = nn.Sequential(
         nn.Linear(n_embed, 4 * n_embed),
         nn.ReLU(),
-        nn.Linear(4 * n_embed, n_embed)
+        nn.Linear(4 * n_embed, n_embed),
+        nn.Dropout(dropout)
     )
 
   def forward(self, x):
@@ -123,12 +133,8 @@ class BiagramLanguageModel(nn.Module):
     super().__init__()
     self.token_embedding_table = nn.Embedding(vocab_size, n_embed)
     self.position_embedding_table = nn.Embedding(block_size, n_embed)
-    self.blocks = nn.Sequential(
-      Block(n_embed, 4),
-      Block(n_embed, 4),
-      Block(n_embed, 4),
-      nn.LayerNorm(n_embed)
-    )
+    self.blocks = nn.Sequential(*[Block(n_embed, n_head=n_head) for _ in range(n_layer)])
+    self.ln_f = nn.LayerNorm(n_embed)
     self.ffwd = FeedForward(n_embed)
     self.lm_head = nn.Linear(n_embed, vocab_size)
 
@@ -139,6 +145,7 @@ class BiagramLanguageModel(nn.Module):
       pos_emb = self.position_embedding_table(torch.arange(T, device=device))
       x = tok_emb + pos_emb
       x = self.blocks(x)
+      x = self.ln_f(x)
       x = self.ffwd(x)
       logits = self.lm_head(x)# (B, T, vocab_size)
 
@@ -189,10 +196,10 @@ def estimate_loss():
 xb,yb = get_batch('train')
 print('inputs:')
 print(xb.shape)
-print(xb)
+# print(xb)
 print('targets:')
 print(yb.shape)
-print(yb)
+# print(yb)
 
 print('----')
 
@@ -200,7 +207,7 @@ for b in range(batch_size):
   for t in range(block_size):
     context = xb[b, :t+1]
     target = yb[b,t]
-    print(f"when input is {context.tolist()} the target: {target}")
+    print(f"when input is {context.tolist().count()} the target: {target}")
 
 optimizer = torch.optim.AdamW(m.parameters(), lr=learning_rate)
 
