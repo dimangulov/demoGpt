@@ -207,7 +207,7 @@ for b in range(batch_size):
   for t in range(block_size):
     context = xb[b, :t+1]
     target = yb[b,t]
-    print(f"when input is {context.tolist().count()} the target: {target}")
+    print(f"when input is {context.tolist()} the target: {target}")
 
 optimizer = torch.optim.AdamW(m.parameters(), lr=learning_rate)
 
