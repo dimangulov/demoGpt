@@ -84,17 +84,21 @@ class MultiHeadAttention(nn.Module):
   def __init__(self, n_heads, head_size):
     super().__init__()
     self.heads = nn.ModuleList([Head(head_size) for _ in range(n_heads)])
+    self.proj = nn.Linear(n_heads * head_size, n_embed)
 
   def forward(self, x):
-    return torch.cat([h(x) for h in self.heads], dim=-1)
+    out = torch.cat([h(x) for h in self.heads], dim=-1);
+    out = self.proj(out)
+    return out
 
 
 class FeedForward(nn.Module):
-  def __init__(self, n_hid):
+  def __init__(self, n_embed):
     super().__init__()
     self.net = nn.Sequential(
-        nn.Linear(n_embed, n_hid),
+        nn.Linear(n_embed, 4 * n_embed),
         nn.ReLU(),
+        nn.Linear(4 * n_embed, n_embed)
     )
 
   def forward(self, x):
@@ -106,10 +110,12 @@ class Block(nn.Module):
     head_size = n_embed // n_head
     self.sa = MultiHeadAttention(n_head, head_size)
     self.ffwd = FeedForward(n_embed)
+    self.ln1 = nn.LayerNorm(n_embed)
+    self.ln2 = nn.LayerNorm(n_embed)
   
   def forward(self, x):
-    x = self.sa(x)
-    x = self.ffwd(x)
+    x = x + self.sa(self.ln1(x))
+    x = x + self.ffwd(self.ln2(x))
     return x
 
 class BiagramLanguageModel(nn.Module):
@@ -121,6 +127,7 @@ class BiagramLanguageModel(nn.Module):
       Block(n_embed, 4),
       Block(n_embed, 4),
       Block(n_embed, 4),
+      nn.LayerNorm(n_embed)
     )
     self.ffwd = FeedForward(n_embed)
     self.lm_head = nn.Linear(n_embed, vocab_size)
